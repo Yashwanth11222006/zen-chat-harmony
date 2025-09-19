@@ -57,6 +57,27 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        zen: {
+          sage: "hsl(var(--zen-sage))",
+          mint: "hsl(var(--zen-mint))",
+          leaf: "hsl(var(--zen-leaf))",
+          olive: "hsl(var(--zen-olive))",
+          forest: "hsl(var(--zen-forest))",
+          deep: "hsl(var(--zen-deep))",
+        },
+      },
+      backgroundImage: {
+        'zen-gradient': 'var(--gradient-zen)',
+        'chat-gradient': 'var(--gradient-chat)',
+        'card-gradient': 'var(--gradient-card)',
+      },
+      boxShadow: {
+        'zen': 'var(--shadow-zen)',
+        'float': 'var(--shadow-float)',
+        'soft': 'var(--shadow-soft)',
+      },
+      transitionProperty: {
+        'zen': 'var(--transition-zen)',
       },
       borderRadius: {
         lg: "var(--radius)",
