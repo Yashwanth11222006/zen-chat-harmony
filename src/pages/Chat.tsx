@@ -181,7 +181,7 @@ const Chat = () => {
         </div>
 
         {/* Chat Container */}
-        <div className="zen-card p-6 h-[70vh] flex flex-col">
+        <div className="zen-card p-6 h-[85vh] flex flex-col">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto mb-4 space-y-4">
             {messages.map((message) => (
