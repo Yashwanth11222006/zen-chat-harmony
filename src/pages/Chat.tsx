@@ -5,6 +5,8 @@ import { Send, ArrowLeft } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import ChatMessage from "@/components/ChatMessage";
 import SuggestionCard from "@/components/SuggestionCard";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 interface Message {
   id: string;
@@ -22,42 +24,13 @@ interface Message {
 const Chat = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      text: "Welcome to Zen Chat! I'm here to guide you on your wellness journey. How are you feeling today?",
-      isUser: false,
-      timestamp: new Date(),
-      suggestions: [
-        {
-          title: "Try Meditation",
-          icon: "🧘",
-          route: "/meditation",
-          description: "Guided mindfulness session"
-        },
-        {
-          title: "Practice Mudra",
-          icon: "🙏",
-          route: "/mudra",
-          description: "Hand positions for focus"
-        },
-        {
-          title: "Sound Healing",
-          icon: "🎵",
-          route: "/sound",
-          description: "Therapeutic sound therapy"
-        },
-        {
-          title: "Talk to Mentor",
-          icon: "👨‍🏫",
-          route: "/mentor",
-          description: "Connect with a wellness guide"
-        }
-      ]
-    }
-  ]);
+  const { toast } = useToast();
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -68,56 +41,220 @@ const Chat = () => {
     scrollToBottom();
   }, [messages]);
 
+  // Initialize session and load chat history
+  useEffect(() => {
+    initializeChat();
+  }, []);
+
   // Check if user is returning from a wellness page
   useEffect(() => {
     const state = location.state as { fromWellness?: boolean; sessionType?: string };
-    if (state?.fromWellness) {
-      const followUpMessage: Message = {
-        id: Date.now().toString(),
-        text: `Welcome back! How was your ${state.sessionType || 'wellness'} session? Did it help you feel calmer and more centered?`,
+    if (state?.fromWellness && sessionId && userId) {
+      handleWellnessReturn(state.sessionType || 'wellness');
+    }
+  }, [location, sessionId, userId]);
+
+  const initializeChat = async () => {
+    try {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        // For demo purposes, create an anonymous session
+        const anonymousUserId = 'anonymous_' + Date.now();
+        setUserId(anonymousUserId);
+        await createNewSession(anonymousUserId);
+        return;
+      }
+
+      setUserId(user.id);
+      
+      // Get or create user profile
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
+
+      if (!profile) {
+        await supabase
+          .from('profiles')
+          .insert({ user_id: user.id, display_name: user.email });
+      }
+
+      // Get or create active session
+      const { data: sessions } = await supabase
+        .from('chat_sessions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (sessions && sessions.length > 0) {
+        setSessionId(sessions[0].id);
+        await loadChatHistory(sessions[0].id);
+      } else {
+        await createNewSession(user.id);
+      }
+
+    } catch (error) {
+      console.error('Error initializing chat:', error);
+      // Fallback to anonymous session
+      const anonymousUserId = 'anonymous_' + Date.now();
+      setUserId(anonymousUserId);
+      await createNewSession(anonymousUserId);
+    }
+  };
+
+  const createNewSession = async (currentUserId: string) => {
+    try {
+      const { data: session, error } = await supabase
+        .from('chat_sessions')
+        .insert({ 
+          user_id: currentUserId,
+          title: 'Wellness Chat Session'
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setSessionId(session.id);
+      
+      // Add welcome message
+      const welcomeMessage: Message = {
+        id: "welcome",
+        text: "🙏 Welcome to Zen Chat! I'm here to guide you on your wellness journey with wisdom from ancient traditions. How are you feeling today?",
         isUser: false,
         timestamp: new Date(),
         suggestions: [
           {
-            title: "Try Another Session",
-            icon: "🔄",
-            route: `/${state.sessionType || 'meditation'}`,
-            description: "Continue your practice"
+            title: "Try Meditation",
+            icon: "🧘",
+            route: "/meditation",
+            description: "Guided mindfulness session"
           },
           {
-            title: "Explore Different Practice",
-            icon: "✨",
-            route: "/meditation",
-            description: "Try something new"
+            title: "Practice Mudra",
+            icon: "🙏",
+            route: "/mudra", 
+            description: "Hand positions for focus"
+          },
+          {
+            title: "Sound Healing",
+            icon: "🎵",
+            route: "/sound",
+            description: "Therapeutic sound therapy"
           }
         ]
       };
-      setMessages(prev => [...prev, followUpMessage]);
+      
+      setMessages([welcomeMessage]);
+      setIsInitialized(true);
+      
+    } catch (error) {
+      console.error('Error creating session:', error);
+      toast({
+        title: "Connection Issue",
+        description: "Having trouble connecting. You can still chat, but messages won't be saved.",
+        variant: "destructive"
+      });
+      setIsInitialized(true);
     }
-  }, [location]);
+  };
 
-  const simulateAIResponse = async (userMessage: string): Promise<string> => {
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
+  const loadChatHistory = async (currentSessionId: string) => {
+    try {
+      const { data: chatMessages } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('session_id', currentSessionId)
+        .order('created_at', { ascending: true });
+
+      if (chatMessages && chatMessages.length > 0) {
+        const formattedMessages: Message[] = chatMessages.map(msg => ({
+          id: msg.id,
+          text: msg.content,
+          isUser: msg.role === 'user',
+          timestamp: new Date(msg.created_at),
+          suggestions: Array.isArray(msg.suggestions) ? msg.suggestions as any[] : []
+        }));
+        setMessages(formattedMessages);
+      } else {
+        // No history, show welcome message
+        const welcomeMessage: Message = {
+          id: "welcome",
+          text: "🙏 Welcome back to Zen Chat! How may I guide you today?",
+          isUser: false,
+          timestamp: new Date(),
+        };
+        setMessages([welcomeMessage]);
+      }
+      
+      setIsInitialized(true);
+    } catch (error) {
+      console.error('Error loading chat history:', error);
+      setIsInitialized(true);
+    }
+  };
+
+  const handleWellnessReturn = async (sessionType: string) => {
+    const message = `Welcome back! How was your ${sessionType} session? Did it help you feel calmer and more centered?`;
     
-    // Simple response logic (replace with actual OpenAI API call)
-    const responses = [
-      "That's wonderful to hear. Mindfulness is a powerful practice for inner peace.",
-      "I understand. Let's explore some techniques that might help you find balance.",
-      "It's natural to feel that way. Would you like to try a guided meditation?",
-      "Great question! Wellness is a journey, and every step counts.",
-      "I'm here to support you. What aspect of wellness interests you most?"
-    ];
-    
-    return responses[Math.floor(Math.random() * responses.length)];
+    if (sessionId && userId) {
+      try {
+        const { data } = await supabase.functions.invoke('ai-chat', {
+          body: { 
+            message: `I just completed a ${sessionType} session and returned to chat.`,
+            sessionId,
+            userId
+          }
+        });
+
+        if (data?.response) {
+          const aiMessage: Message = {
+            id: Date.now().toString(),
+            text: data.response,
+            isUser: false,
+            timestamp: new Date(),
+            suggestions: data.suggestions || []
+          };
+          setMessages(prev => [...prev, aiMessage]);
+        }
+      } catch (error) {
+        console.error('Error handling wellness return:', error);
+      }
+    }
+  };
+
+  const callAIChat = async (userMessage: string): Promise<{ response: string; suggestions: any[] }> => {
+    if (!sessionId || !userId) {
+      throw new Error('Session not initialized');
+    }
+
+    const { data, error } = await supabase.functions.invoke('ai-chat', {
+      body: { 
+        message: userMessage,
+        sessionId,
+        userId
+      }
+    });
+
+    if (error) {
+      console.error('AI Chat error:', error);
+      throw error;
+    }
+
+    return data;
   };
 
   const handleSendMessage = async () => {
-    if (!inputValue.trim() || isLoading) return;
+    if (!inputValue.trim() || isLoading || !sessionId || !userId) return;
 
+    const messageText = inputValue;
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: inputValue,
+      text: messageText,
       isUser: true,
       timestamp: new Date()
     };
@@ -127,30 +264,41 @@ const Chat = () => {
     setIsLoading(true);
 
     try {
-      const aiResponse = await simulateAIResponse(inputValue);
+      const { response, suggestions } = await callAIChat(messageText);
+      
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: aiResponse,
+        text: response,
         isUser: false,
         timestamp: new Date(),
-        suggestions: [
-          {
-            title: "Guided Meditation",
-            icon: "🧘",
-            route: "/meditation",
-            description: "10-minute mindfulness session"
-          },
-          {
-            title: "Breathing Exercise",
-            icon: "💨",
-            route: "/sound",
-            description: "Calming breath work"
-          }
-        ]
+        suggestions: suggestions || []
       };
       setMessages(prev => [...prev, aiMessage]);
     } catch (error) {
       console.error("Error generating AI response:", error);
+      
+      // Fallback response
+      const fallbackMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: "I'm experiencing some difficulties right now. Let me share some wisdom: even in uncertainty, there is an opportunity for growth. Take a deep breath and try again in a moment. 🌱",
+        isUser: false,
+        timestamp: new Date(),
+        suggestions: [
+          {
+            title: "Try Meditation",
+            icon: "🧘",
+            route: "/meditation",
+            description: "Find peace in the present moment"
+          }
+        ]
+      };
+      setMessages(prev => [...prev, fallbackMessage]);
+      
+      toast({
+        title: "Connection Issue",
+        description: "Having trouble connecting to AI. You can still use the wellness features.",
+        variant: "destructive"
+      });
     } finally {
       setIsLoading(false);
     }
@@ -162,6 +310,17 @@ const Chat = () => {
       handleSendMessage();
     }
   };
+
+  if (!isInitialized) {
+    return (
+      <div className="min-h-screen p-4 flex items-center justify-center">
+        <div className="zen-card p-8 text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zen-forest mx-auto mb-4"></div>
+          <p className="text-zen-olive">Preparing your wellness space...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen p-4">
