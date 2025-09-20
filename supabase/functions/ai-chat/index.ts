@@ -1,6 +1,16 @@
+// @ts-ignore - Deno remote imports
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
+// @ts-ignore - Deno remote imports
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// @ts-ignore - Deno remote imports
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.4';
+
+// Deno global type declarations
+declare const Deno: {
+  env: {
+    get(key: string): string | undefined;
+  };
+};
 
 const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -99,12 +109,16 @@ serve(async (req) => {
 
     console.log('Processing chat request for user:', userId);
 
-    // Get user profile for personalization
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
+    // Get user profile for personalization (only for authenticated users)
+    let profile: any = null;
+    if (!userId.startsWith('anonymous_')) {
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+      profile = profileData;
+    }
 
     // Get recent chat history (last 10 messages) for context
     const { data: recentMessages } = await supabase
@@ -118,7 +132,7 @@ serve(async (req) => {
     const chatHistory = recentMessages ? recentMessages.reverse() : [];
 
     // Extract recent emotions from past messages
-    const recentEmotions = profile?.past_emotions?.slice(-3) || [];
+    const recentEmotions = (profile?.past_emotions as string[])?.slice(-3) || [];
 
     // Build messages array for OpenAI
     const messages = [
@@ -188,9 +202,9 @@ serve(async (req) => {
         suggestions: suggestions
       });
 
-    // Update user profile with emotion tracking
-    if (profile) {
-      const detectedEmotions = [];
+    // Update user profile with emotion tracking (only for authenticated users)
+    if (profile && !userId.startsWith('anonymous_')) {
+      const detectedEmotions: string[] = [];
       for (const [emotion, keywords] of Object.entries(WELLNESS_TRIGGERS)) {
         if (keywords.some(keyword => message.toLowerCase().includes(keyword))) {
           detectedEmotions.push(emotion);
@@ -198,7 +212,8 @@ serve(async (req) => {
       }
 
       if (detectedEmotions.length > 0) {
-        const updatedEmotions = [...(profile.past_emotions || []), ...detectedEmotions].slice(-10);
+        const currentEmotions = (profile.past_emotions as string[]) || [];
+        const updatedEmotions = [...currentEmotions, ...detectedEmotions].slice(-10);
         await supabase
           .from('profiles')
           .update({ 

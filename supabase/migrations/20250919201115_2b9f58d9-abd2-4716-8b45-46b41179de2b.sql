@@ -14,7 +14,7 @@ CREATE TABLE public.profiles (
 -- Create chat sessions table
 CREATE TABLE public.chat_sessions (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL, -- Changed from UUID to TEXT to support anonymous users
   title TEXT DEFAULT 'New Chat',
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
@@ -24,7 +24,7 @@ CREATE TABLE public.chat_sessions (
 CREATE TABLE public.chat_messages (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   session_id UUID REFERENCES public.chat_sessions(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL, -- Changed from UUID to TEXT to support anonymous users
   content TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
   suggestions JSONB DEFAULT '[]',
@@ -56,33 +56,33 @@ WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Users can view their own chat sessions" 
 ON public.chat_sessions 
 FOR SELECT 
-USING (auth.uid() = user_id);
+USING (auth.uid()::text = user_id OR user_id LIKE 'anonymous_%');
 
 CREATE POLICY "Users can create their own chat sessions" 
 ON public.chat_sessions 
 FOR INSERT 
-WITH CHECK (auth.uid() = user_id);
+WITH CHECK (auth.uid()::text = user_id OR user_id LIKE 'anonymous_%');
 
 CREATE POLICY "Users can update their own chat sessions" 
 ON public.chat_sessions 
 FOR UPDATE 
-USING (auth.uid() = user_id);
+USING (auth.uid()::text = user_id OR user_id LIKE 'anonymous_%');
 
 CREATE POLICY "Users can delete their own chat sessions" 
 ON public.chat_sessions 
 FOR DELETE 
-USING (auth.uid() = user_id);
+USING (auth.uid()::text = user_id OR user_id LIKE 'anonymous_%');
 
 -- RLS policies for chat messages
 CREATE POLICY "Users can view their own chat messages" 
 ON public.chat_messages 
 FOR SELECT 
-USING (auth.uid() = user_id);
+USING (auth.uid()::text = user_id OR user_id LIKE 'anonymous_%');
 
 CREATE POLICY "Users can create their own chat messages" 
 ON public.chat_messages 
 FOR INSERT 
-WITH CHECK (auth.uid() = user_id);
+WITH CHECK (auth.uid()::text = user_id OR user_id LIKE 'anonymous_%');
 
 -- Create function to update timestamps
 CREATE OR REPLACE FUNCTION public.update_updated_at_column()
